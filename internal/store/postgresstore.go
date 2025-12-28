@@ -186,22 +186,22 @@ func (s *PostgresStore) WorkDir() string {
 func (s *PostgresStore) SetBaseDir(string) {}
 
 // Save persists authentication metadata to disk and PostgreSQL.
-func (s *PostgresStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (string, error) {
+func (s *PostgresStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (string, bool, error) {
 	if auth == nil {
-		return "", fmt.Errorf("postgres store: auth is nil")
+		return "", false, fmt.Errorf("postgres store: auth is nil")
 	}
 
 	path, err := s.resolveAuthPath(auth)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if path == "" {
-		return "", fmt.Errorf("postgres store: missing file path attribute for %s", auth.ID)
+		return "", false, fmt.Errorf("postgres store: missing file path attribute for %s", auth.ID)
 	}
 
 	if auth.Disabled {
 		if _, statErr := os.Stat(path); errors.Is(statErr, fs.ErrNotExist) {
-			return "", nil
+			return "", false, nil
 		}
 	}
 
@@ -209,35 +209,35 @@ func (s *PostgresStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (stri
 	defer s.mu.Unlock()
 
 	if err = os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return "", fmt.Errorf("postgres store: create auth directory: %w", err)
+		return "", false, fmt.Errorf("postgres store: create auth directory: %w", err)
 	}
 
 	switch {
 	case auth.Storage != nil:
 		if err = auth.Storage.SaveTokenToFile(path); err != nil {
-			return "", err
+			return "", false, err
 		}
 	case auth.Metadata != nil:
 		raw, errMarshal := json.Marshal(auth.Metadata)
 		if errMarshal != nil {
-			return "", fmt.Errorf("postgres store: marshal metadata: %w", errMarshal)
+			return "", false, fmt.Errorf("postgres store: marshal metadata: %w", errMarshal)
 		}
 		if existing, errRead := os.ReadFile(path); errRead == nil {
 			if jsonEqual(existing, raw) {
-				return path, nil
+				return path, false, nil
 			}
 		} else if errRead != nil && !errors.Is(errRead, fs.ErrNotExist) {
-			return "", fmt.Errorf("postgres store: read existing metadata: %w", errRead)
+			return "", false, fmt.Errorf("postgres store: read existing metadata: %w", errRead)
 		}
 		tmp := path + ".tmp"
 		if errWrite := os.WriteFile(tmp, raw, 0o600); errWrite != nil {
-			return "", fmt.Errorf("postgres store: write temp auth file: %w", errWrite)
+			return "", false, fmt.Errorf("postgres store: write temp auth file: %w", errWrite)
 		}
 		if errRename := os.Rename(tmp, path); errRename != nil {
-			return "", fmt.Errorf("postgres store: rename auth file: %w", errRename)
+			return "", false, fmt.Errorf("postgres store: rename auth file: %w", errRename)
 		}
 	default:
-		return "", fmt.Errorf("postgres store: nothing to persist for %s", auth.ID)
+		return "", false, fmt.Errorf("postgres store: nothing to persist for %s", auth.ID)
 	}
 
 	if auth.Attributes == nil {
@@ -251,12 +251,13 @@ func (s *PostgresStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (stri
 
 	relID, err := s.relativeAuthID(path)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	if err = s.upsertAuthRecord(ctx, relID, path); err != nil {
-		return "", err
+	conflict, err := s.upsertAuthRecord(ctx, relID, path)
+	if err != nil {
+		return "", false, err
 	}
-	return path, nil
+	return path, conflict, nil
 }
 
 // List enumerates all auth records stored in PostgreSQL.
@@ -486,22 +487,30 @@ func (s *PostgresStore) syncAuthFile(ctx context.Context, relID, path string) er
 	if len(data) == 0 {
 		return s.deleteAuthRecord(ctx, relID)
 	}
-	return s.persistAuth(ctx, relID, data)
+	_, err = s.persistAuth(ctx, relID, data)
+	return err
 }
 
-func (s *PostgresStore) upsertAuthRecord(ctx context.Context, relID, path string) error {
+func (s *PostgresStore) upsertAuthRecord(ctx context.Context, relID, path string) (bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("postgres store: read auth file: %w", err)
+		return false, fmt.Errorf("postgres store: read auth file: %w", err)
 	}
 	if len(data) == 0 {
-		return s.deleteAuthRecord(ctx, relID)
+		return false, s.deleteAuthRecord(ctx, relID)
 	}
 	return s.persistAuth(ctx, relID, data)
 }
 
-func (s *PostgresStore) persistAuth(ctx context.Context, relID string, data []byte) error {
+func (s *PostgresStore) persistAuth(ctx context.Context, relID string, data []byte) (bool, error) {
 	jsonPayload := json.RawMessage(data)
+
+	// First, check if the ID already exists
+	checkQuery := fmt.Sprintf("SELECT 1 FROM %s WHERE id = $1", s.fullTableName(s.cfg.AuthTable))
+	var exists int
+	err := s.db.QueryRowContext(ctx, checkQuery, relID).Scan(&exists)
+	conflict := err == nil // If no error, record exists (conflict)
+
 	query := fmt.Sprintf(`
 		INSERT INTO %s (id, content, created_at, updated_at)
 		VALUES ($1, $2, NOW(), NOW())
@@ -509,9 +518,9 @@ func (s *PostgresStore) persistAuth(ctx context.Context, relID string, data []by
 		DO UPDATE SET content = EXCLUDED.content, updated_at = NOW()
 	`, s.fullTableName(s.cfg.AuthTable))
 	if _, err := s.db.ExecContext(ctx, query, relID, jsonPayload); err != nil {
-		return fmt.Errorf("postgres store: upsert auth record: %w", err)
+		return false, fmt.Errorf("postgres store: upsert auth record: %w", err)
 	}
-	return nil
+	return conflict, nil
 }
 
 func (s *PostgresStore) deleteAuthRecord(ctx context.Context, relID string) error {

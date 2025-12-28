@@ -1240,7 +1240,7 @@ func (m *Manager) persist(ctx context.Context, auth *Auth) error {
 	if auth.Metadata == nil {
 		return nil
 	}
-	_, err := m.store.Save(ctx, auth)
+	_, _, err := m.store.Save(ctx, auth)
 	return err
 }
 

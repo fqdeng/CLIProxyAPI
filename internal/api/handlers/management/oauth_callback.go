@@ -96,5 +96,6 @@ func (h *Handler) PostOAuthCallback(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	firstSave, _ := GetFirstSaveStatus(state)
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "first_save": firstSave})
 }

@@ -101,7 +101,7 @@ func (h *Handler) ImportVertexCredential(c *gin.Context) {
 	if reqCtx := c.Request.Context(); reqCtx != nil {
 		ctx = reqCtx
 	}
-	savedPath, err := h.saveTokenRecord(ctx, record)
+	savedPath, _, err := h.saveTokenRecord(ctx, record)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "save_failed", "message": err.Error()})
 		return

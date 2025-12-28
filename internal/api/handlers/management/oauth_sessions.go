@@ -166,13 +166,19 @@ func (s *oauthSessionStore) IsPending(state, provider string) bool {
 	return strings.EqualFold(session.Provider, provider)
 }
 
-var oauthSessions = newOAuthSessionStore(oauthSessionTTL)
+var (
+	oauthSessions     = newOAuthSessionStore(oauthSessionTTL)
+	firstSaveSessions = newFirstSaveSessionStore(oauthSessionTTL)
+)
 
 func RegisterOAuthSession(state, provider string) { oauthSessions.Register(state, provider) }
 
 func SetOAuthSessionError(state, message string) { oauthSessions.SetError(state, message) }
 
-func CompleteOAuthSession(state string) { oauthSessions.Complete(state) }
+func CompleteOAuthSession(state string) {
+	oauthSessions.Complete(state)
+	firstSaveSessions.Delete(state)
+}
 
 func CompleteOAuthSessionsByProvider(provider string) int {
 	return oauthSessions.CompleteProvider(provider)
@@ -189,6 +195,79 @@ func GetOAuthSession(state string) (provider string, status string, ok bool) {
 func IsOAuthSessionPending(state, provider string) bool {
 	return oauthSessions.IsPending(state, provider)
 }
+
+func SetFirstSaveStatus(state string, isFirstSave bool) {
+	firstSaveSessions.Set(state, isFirstSave)
+}
+
+func GetFirstSaveStatus(state string) (bool, bool) {
+	return firstSaveSessions.Get(state)
+}
+
+type firstSaveSessionStore struct {
+	mu       sync.RWMutex
+	ttl      time.Duration
+	sessions map[string]firstSaveSession
+}
+
+type firstSaveSession struct {
+	isFirstSave bool
+	expiresAt   time.Time
+}
+
+func newFirstSaveSessionStore(ttl time.Duration) *firstSaveSessionStore {
+	if ttl <= 0 {
+		ttl = oauthSessionTTL
+	}
+	return &firstSaveSessionStore{
+		ttl:      ttl,
+		sessions: make(map[string]firstSaveSession),
+	}
+}
+
+func (s *firstSaveSessionStore) purgeExpiredLocked(now time.Time) {
+	for state, session := range s.sessions {
+		if !session.expiresAt.IsZero() && now.After(session.expiresAt) {
+			delete(s.sessions, state)
+		}
+	}
+}
+
+func (s *firstSaveSessionStore) Set(state string, isFirstSave bool) {
+	state = strings.TrimSpace(state)
+	if state == "" {
+		return
+	}
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.purgeExpiredLocked(now)
+	s.sessions[state] = firstSaveSession{
+		isFirstSave: isFirstSave,
+		expiresAt:   now.Add(s.ttl),
+	}
+}
+
+func (s *firstSaveSessionStore) Get(state string) (bool, bool) {
+	state = strings.TrimSpace(state)
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.purgeExpiredLocked(now)
+	session, ok := s.sessions[state]
+	if !ok {
+		return false, false
+	}
+	return session.isFirstSave, true
+}
+
+func (s *firstSaveSessionStore) Delete(state string) {
+	state = strings.TrimSpace(state)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.sessions, state)
+}
+
 
 func ValidateOAuthState(state string) error {
 	trimmed := strings.TrimSpace(state)

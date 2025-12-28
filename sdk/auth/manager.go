@@ -68,7 +68,7 @@ func (m *Manager) Login(ctx context.Context, provider string, cfg *config.Config
 		}
 	}
 
-	savedPath, err := m.store.Save(ctx, record)
+	savedPath, _, err := m.store.Save(ctx, record)
 	if err != nil {
 		return record, "", err
 	}

@@ -35,22 +35,25 @@ func (s *FileTokenStore) SetBaseDir(dir string) {
 }
 
 // Save persists token storage and metadata to the resolved auth file path.
-func (s *FileTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (string, error) {
+func (s *FileTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (string, bool, error) {
 	if auth == nil {
-		return "", fmt.Errorf("auth filestore: auth is nil")
+		return "", false, fmt.Errorf("auth filestore: auth is nil")
 	}
 
 	path, err := s.resolveAuthPath(auth)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if path == "" {
-		return "", fmt.Errorf("auth filestore: missing file path attribute for %s", auth.ID)
+		return "", false, fmt.Errorf("auth filestore: missing file path attribute for %s", auth.ID)
 	}
 
+	_, statErr := os.Stat(path)
+	fileExists := !os.IsNotExist(statErr)
+
 	if auth.Disabled {
-		if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
-			return "", nil
+		if !fileExists {
+			return "", false, nil
 		}
 	}
 
@@ -58,37 +61,37 @@ func (s *FileTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (str
 	defer s.mu.Unlock()
 
 	if err = os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return "", fmt.Errorf("auth filestore: create dir failed: %w", err)
+		return "", fileExists, fmt.Errorf("auth filestore: create dir failed: %w", err)
 	}
 
 	switch {
 	case auth.Storage != nil:
 		if err = auth.Storage.SaveTokenToFile(path); err != nil {
-			return "", err
+			return "", fileExists, err
 		}
 	case auth.Metadata != nil:
 		raw, errMarshal := json.Marshal(auth.Metadata)
 		if errMarshal != nil {
-			return "", fmt.Errorf("auth filestore: marshal metadata failed: %w", errMarshal)
+			return "", fileExists, fmt.Errorf("auth filestore: marshal metadata failed: %w", errMarshal)
 		}
 		if existing, errRead := os.ReadFile(path); errRead == nil {
 			// Use metadataEqualIgnoringTimestamps to skip writes when only timestamp fields change.
 			// This prevents the token refresh loop caused by timestamp/expired/expires_in changes.
 			if metadataEqualIgnoringTimestamps(existing, raw) {
-				return path, nil
+				return path, true, nil
 			}
 		} else if errRead != nil && !os.IsNotExist(errRead) {
-			return "", fmt.Errorf("auth filestore: read existing failed: %w", errRead)
+			return "", fileExists, fmt.Errorf("auth filestore: read existing failed: %w", errRead)
 		}
 		tmp := path + ".tmp"
 		if errWrite := os.WriteFile(tmp, raw, 0o600); errWrite != nil {
-			return "", fmt.Errorf("auth filestore: write temp failed: %w", errWrite)
+			return "", fileExists, fmt.Errorf("auth filestore: write temp failed: %w", errWrite)
 		}
 		if errRename := os.Rename(tmp, path); errRename != nil {
-			return "", fmt.Errorf("auth filestore: rename failed: %w", errRename)
+			return "", fileExists, fmt.Errorf("auth filestore: rename failed: %w", errRename)
 		}
 	default:
-		return "", fmt.Errorf("auth filestore: nothing to persist for %s", auth.ID)
+		return "", fileExists, fmt.Errorf("auth filestore: nothing to persist for %s", auth.ID)
 	}
 
 	if auth.Attributes == nil {
@@ -100,7 +103,7 @@ func (s *FileTokenStore) Save(ctx context.Context, auth *cliproxyauth.Auth) (str
 		auth.FileName = auth.ID
 	}
 
-	return path, nil
+	return path, fileExists, nil
 }
 
 // List enumerates all auth JSON files under the configured directory.

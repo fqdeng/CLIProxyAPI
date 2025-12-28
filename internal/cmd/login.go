@@ -160,7 +160,7 @@ func DoLogin(cfg *config.Config, projectID string, options *LoginOptions) {
 		setter.SetBaseDir(cfg.AuthDir)
 	}
 
-	savedPath, errSave := store.Save(ctx, record)
+	savedPath, _, errSave := store.Save(ctx, record)
 	if errSave != nil {
 		log.Errorf("Failed to save token to file: %v", errSave)
 		return

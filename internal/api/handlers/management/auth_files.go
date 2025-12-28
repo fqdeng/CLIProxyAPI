@@ -789,13 +789,13 @@ func (h *Handler) tokenStoreWithBaseDir() coreauth.Store {
 	return store
 }
 
-func (h *Handler) saveTokenRecord(ctx context.Context, record *coreauth.Auth) (string, error) {
+func (h *Handler) saveTokenRecord(ctx context.Context, record *coreauth.Auth) (string, bool, error) {
 	if record == nil {
-		return "", fmt.Errorf("token record is nil")
+		return "", false, fmt.Errorf("token record is nil")
 	}
 	store := h.tokenStoreWithBaseDir()
 	if store == nil {
-		return "", fmt.Errorf("token store unavailable")
+		return "", false, fmt.Errorf("token store unavailable")
 	}
 	return store.Save(ctx, record)
 }
@@ -978,12 +978,13 @@ func (h *Handler) RequestAnthropicToken(c *gin.Context) {
 			Storage:  tokenStorage,
 			Metadata: map[string]any{"email": tokenStorage.Email},
 		}
-		savedPath, errSave := h.saveTokenRecord(ctx, record)
+		savedPath, firstSave, errSave := h.saveTokenRecord(ctx, record)
 		if errSave != nil {
 			log.Errorf("Failed to save authentication tokens: %v", errSave)
 			SetOAuthSessionError(state, "Failed to save authentication tokens")
 			return
 		}
+		SetFirstSaveStatus(state, firstSave)
 
 		fmt.Printf("Authentication successful! Token saved to %s\n", savedPath)
 		if bundle.APIKey != "" {
@@ -1224,12 +1225,13 @@ func (h *Handler) RequestGeminiCLIToken(c *gin.Context) {
 			Storage:  &ts,
 			Metadata: recordMetadata,
 		}
-		savedPath, errSave := h.saveTokenRecord(ctx, record)
+		savedPath, firstSave, errSave := h.saveTokenRecord(ctx, record)
 		if errSave != nil {
 			log.Errorf("Failed to save token to file: %v", errSave)
 			SetOAuthSessionError(state, "Failed to save token to file")
 			return
 		}
+		SetFirstSaveStatus(state, firstSave)
 
 		CompleteOAuthSession(state)
 		CompleteOAuthSessionsByProvider("gemini")
@@ -1406,12 +1408,13 @@ func (h *Handler) RequestCodexToken(c *gin.Context) {
 				"account_id": tokenStorage.AccountID,
 			},
 		}
-		savedPath, errSave := h.saveTokenRecord(ctx, record)
+		savedPath, firstSave, errSave := h.saveTokenRecord(ctx, record)
 		if errSave != nil {
 			SetOAuthSessionError(state, "Failed to save authentication tokens")
 			log.Errorf("Failed to save authentication tokens: %v", errSave)
 			return
 		}
+		SetFirstSaveStatus(state, firstSave)
 		fmt.Printf("Authentication successful! Token saved to %s\n", savedPath)
 		if bundle.APIKey != "" {
 			fmt.Println("API key obtained and saved")
@@ -1646,12 +1649,13 @@ func (h *Handler) RequestAntigravityToken(c *gin.Context) {
 			Label:    label,
 			Metadata: metadata,
 		}
-		savedPath, errSave := h.saveTokenRecord(ctx, record)
+		savedPath, firstSave, errSave := h.saveTokenRecord(ctx, record)
 		if errSave != nil {
 			log.Errorf("Failed to save token to file: %v", errSave)
 			SetOAuthSessionError(state, "Failed to save token to file")
 			return
 		}
+		SetFirstSaveStatus(state, firstSave)
 
 		CompleteOAuthSession(state)
 		CompleteOAuthSessionsByProvider("antigravity")
@@ -1705,12 +1709,13 @@ func (h *Handler) RequestQwenToken(c *gin.Context) {
 			Storage:  tokenStorage,
 			Metadata: map[string]any{"email": tokenStorage.Email},
 		}
-		savedPath, errSave := h.saveTokenRecord(ctx, record)
+		savedPath, firstSave, errSave := h.saveTokenRecord(ctx, record)
 		if errSave != nil {
 			log.Errorf("Failed to save authentication tokens: %v", errSave)
 			SetOAuthSessionError(state, "Failed to save authentication tokens")
 			return
 		}
+		SetFirstSaveStatus(state, firstSave)
 
 		fmt.Printf("Authentication successful! Token saved to %s\n", savedPath)
 		fmt.Println("You can now use Qwen services through this CLI")
@@ -1814,12 +1819,13 @@ func (h *Handler) RequestIFlowToken(c *gin.Context) {
 			Attributes: map[string]string{"api_key": tokenStorage.APIKey},
 		}
 
-		savedPath, errSave := h.saveTokenRecord(ctx, record)
+		savedPath, firstSave, errSave := h.saveTokenRecord(ctx, record)
 		if errSave != nil {
 			SetOAuthSessionError(state, "Failed to save authentication tokens")
 			log.Errorf("Failed to save authentication tokens: %v", errSave)
 			return
 		}
+		SetFirstSaveStatus(state, firstSave)
 
 		fmt.Printf("Authentication successful! Token saved to %s\n", savedPath)
 		if tokenStorage.APIKey != "" {
@@ -1910,7 +1916,7 @@ func (h *Handler) RequestIFlowCookieToken(c *gin.Context) {
 		},
 	}
 
-	savedPath, errSave := h.saveTokenRecord(ctx, record)
+	savedPath, _, errSave := h.saveTokenRecord(ctx, record)
 	if errSave != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "error": "failed to save authentication tokens"})
 		return
