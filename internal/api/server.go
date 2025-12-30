@@ -476,13 +476,7 @@ func (s *Server) registerManagementRoutes() {
 	mgmt.Use(s.managementAvailabilityMiddleware())
 
 	// Public routes (no auth)
-	mgmt.GET("/anthropic-auth-url", s.mgmt.RequestAnthropicToken)
-	mgmt.GET("/codex-auth-url", s.mgmt.RequestCodexToken)
-	mgmt.GET("/gemini-cli-auth-url", s.mgmt.RequestGeminiCLIToken)
 	mgmt.GET("/antigravity-auth-url", s.mgmt.RequestAntigravityToken)
-	mgmt.GET("/qwen-auth-url", s.mgmt.RequestQwenToken)
-	mgmt.GET("/iflow-auth-url", s.mgmt.RequestIFlowToken)
-	mgmt.POST("/iflow-auth-url", s.mgmt.RequestIFlowCookieToken)
 	mgmt.POST("/oauth-callback", s.mgmt.PostOAuthCallback)
 	mgmt.GET("/get-auth-status", s.mgmt.GetAuthStatus)
 
@@ -490,6 +484,13 @@ func (s *Server) registerManagementRoutes() {
 	authedMgmt := mgmt.Group("/")
 	authedMgmt.Use(s.mgmt.Middleware())
 	{
+		authedMgmt.GET("/anthropic-auth-url", s.mgmt.RequestAnthropicToken)
+		authedMgmt.GET("/codex-auth-url", s.mgmt.RequestCodexToken)
+		authedMgmt.GET("/gemini-cli-auth-url", s.mgmt.RequestGeminiCLIToken)
+		authedMgmt.GET("/qwen-auth-url", s.mgmt.RequestQwenToken)
+		authedMgmt.GET("/iflow-auth-url", s.mgmt.RequestIFlowToken)
+		authedMgmt.POST("/iflow-auth-url", s.mgmt.RequestIFlowCookieToken)
+
 		authedMgmt.GET("/usage", s.mgmt.GetUsageStatistics)
 		authedMgmt.GET("/usage/export", s.mgmt.ExportUsageStatistics)
 		authedMgmt.POST("/usage/import", s.mgmt.ImportUsageStatistics)
