@@ -480,7 +480,7 @@ func (s *Server) registerManagementRoutes() {
 	mgmt.POST("/oauth-callback", s.mgmt.PostOAuthCallback)
 	mgmt.GET("/get-auth-status", s.mgmt.GetAuthStatus)
 	mgmt.GET("/auth-files-without-auth", s.mgmt.ListAuthFilesWithoutAuth)
-	mgmt.POST("/api-call-without-auth", s.mgmt.APICall)
+	mgmt.POST("/api-call-withou-auth", s.mgmt.APICall)
 
 	// Authenticated routes
 	authedMgmt := mgmt.Group("/")
