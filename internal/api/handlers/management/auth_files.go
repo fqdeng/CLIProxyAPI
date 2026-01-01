@@ -3,6 +3,7 @@ package management
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -252,7 +253,9 @@ func (h *Handler) managementCallbackURL(path string) (string, error) {
 	return fmt.Sprintf("%s://127.0.0.1:%d%s", scheme, h.cfg.Port, path), nil
 }
 
-func (h *Handler) ListAuthFiles(c *gin.Context) {
+type buildAuthFileEntryFunc func(auth *coreauth.Auth) gin.H
+
+func (h *Handler) listAuthFiles(c *gin.Context, buildEntry buildAuthFileEntryFunc) {
 	if h == nil {
 		c.JSON(500, gin.H{"error": "handler not initialized"})
 		return
@@ -264,7 +267,7 @@ func (h *Handler) ListAuthFiles(c *gin.Context) {
 	auths := h.authManager.List()
 	files := make([]gin.H, 0, len(auths))
 	for _, auth := range auths {
-		if entry := h.buildAuthFileEntry(auth); entry != nil {
+		if entry := buildEntry(auth); entry != nil {
 			files = append(files, entry)
 		}
 	}
@@ -274,6 +277,14 @@ func (h *Handler) ListAuthFiles(c *gin.Context) {
 		return strings.ToLower(nameI) < strings.ToLower(nameJ)
 	})
 	c.JSON(200, gin.H{"files": files})
+}
+
+func (h *Handler) ListAuthFilesWithoutAuth(c *gin.Context) {
+	h.listAuthFiles(c, h.buildAuthFileEntryWithoutAuth)
+}
+
+func (h *Handler) ListAuthFiles(c *gin.Context) {
+	h.listAuthFiles(c, h.buildAuthFileEntry)
 }
 
 // GetAuthFileModels returns the models supported by a specific auth file
@@ -356,6 +367,19 @@ func (h *Handler) listAuthFilesFromDisk(c *gin.Context) {
 		}
 	}
 	c.JSON(200, gin.H{"files": files})
+}
+
+func (h *Handler) buildAuthFileEntryWithoutAuth(auth *coreauth.Auth) gin.H {
+	entry := h.buildAuthFileEntry(auth)
+	if entry == nil {
+		return nil
+	}
+	if email, ok := entry["email"].(string); ok && email != "" {
+		hasher := sha256.New()
+		hasher.Write([]byte(email))
+		entry["email"] = fmt.Sprintf("%x", hasher.Sum(nil))
+	}
+	return entry
 }
 
 func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
