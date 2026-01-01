@@ -374,10 +374,13 @@ func (h *Handler) buildAuthFileEntryWithoutAuth(auth *coreauth.Auth) gin.H {
 	if entry == nil {
 		return nil
 	}
-	if email, ok := entry["email"].(string); ok && email != "" {
-		hasher := sha256.New()
-		hasher.Write([]byte(email))
-		entry["email"] = fmt.Sprintf("%x", hasher.Sum(nil))
+	fieldsToHash := []string{"id", "email", "account", "path", "name"}
+	for _, field := range fieldsToHash {
+		if value, ok := entry[field].(string); ok && value != "" {
+			hasher := sha256.New()
+			hasher.Write([]byte(value))
+			entry[field] = fmt.Sprintf("%x", hasher.Sum(nil))
+		}
 	}
 	return entry
 }
